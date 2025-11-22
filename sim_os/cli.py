@@ -81,6 +81,9 @@ class CommandLineInterface:
             'vmem': self._virtual_memory_info,
             'processflow': self._process_flow,
             'ioinfo': self._io_info,
+            'schedpolicy': self._sched_policy,
+            'dev': self._dev_command,
+            'io': self._io_activate,
             'touch': self._create_file,
             'cat': self._read_file,
             'echo': self._write_file,
@@ -144,7 +147,8 @@ Seguridad:
                 "`create <nombre> [prioridad] [memoria]` - Crea un proceso",
                 "`kill <pid>` - Termina un proceso",
                 "`processflow <pid>` - Ciclo de vida",
-                "`schedule` - Ejecuta el planificador"
+                "`schedule` - Ejecuta el planificador",
+                "`schedpolicy <FIFO|RR|PRIORITY_RR>` - Cambia política"
             ],
             "Sistema": [
                 "`top` - Información general",
@@ -162,6 +166,13 @@ Seguridad:
                 "`ls` - Lista archivos",
                 "`rm <archivo>` - Elimina archivo",
                 "`fsinfo` - Permisos"
+            ],
+            "E/S": [
+                "`dev list` - Lista dispositivos",
+                "`dev on <dispositivo>` - Activa dispositivo",
+                "`dev off <dispositivo>` - Desactiva dispositivo",
+                "`dev mode <dispositivo> <DMA|PROGRAMADO>` - Cambia modo",
+                "`io <dispositivo> [duración]` - Solicitud E/S"
             ],
             "Otros": [
                 "`login <user> <pass>` - Autenticación",
@@ -664,6 +675,54 @@ Seguridad:
             border_style="magenta",
             box=box.ROUNDED if box else None
         )
+
+    def _sched_policy(self, args):
+        if not args:
+            return "Uso: schedpolicy <FIFO|RR|PRIORITY_RR>"
+        ok = self.os.cpu_scheduler.set_policy(args[0].upper())
+        if not ok:
+            return self._styled_feedback("Política no reconocida", success=False, title="Planificador")
+        return self._styled_feedback(f"Política cambiada a {self.os.cpu_scheduler.policy}", success=True, title="Planificador")
+
+    def _dev_command(self, args):
+        if not args:
+            return "Uso: dev <list|on|off|mode> [args]"
+        sub = args[0].lower()
+        if sub == "list":
+            status = self.os.io_manager.get_status()
+            if not self.rich_enabled:
+                lines = ["=== DISPOSITIVOS ==="]
+                for dev in status:
+                    lines.append(f"{dev['name']} - {dev['mode']} - {'BUSY' if dev['busy'] else 'Libre'}")
+                return "\n".join(lines)
+            table = Table(title="Dispositivos", box=box.ROUNDED if box else None)
+            table.add_column("Dispositivo")
+            table.add_column("Modo")
+            table.add_column("Estado")
+            for dev in status:
+                table.add_row(dev['name'], dev['mode'], "BUSY" if dev['busy'] else "Libre")
+            return table
+        if sub in {"on", "off"}:
+            if len(args) < 2:
+                return "Uso: dev on|off <dispositivo>"
+            busy = sub == "on"
+            ok, msg = self.os.io_manager.set_busy(args[1], busy)
+            return self._styled_feedback(msg, success=ok, title="Dispositivo")
+        if sub == "mode":
+            if len(args) < 3:
+                return "Uso: dev mode <dispositivo> <DMA|PROGRAMADO>"
+            ok, msg = self.os.io_manager.set_mode(args[1], args[2])
+            return self._styled_feedback(msg, success=ok, title="Dispositivo")
+        return self._styled_feedback("Subcomando no reconocido", success=False, title="Dispositivo")
+
+    def _io_activate(self, args):
+        if not args:
+            return "Uso: io <dispositivo> [duración]"
+        device = args[0]
+        duration = int(args[1]) if len(args) > 1 and args[1].isdigit() else 1
+        pid = self.os.cpu_scheduler.get_running_process().pid if self.os.cpu_scheduler.get_running_process() else 0
+        ok, msg = self.os.io_manager.request_io(pid, device, duration)
+        return self._styled_feedback(msg, success=ok, title="E/S")
 
     def _clear(self, args):
         if self.console:

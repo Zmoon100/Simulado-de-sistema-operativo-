@@ -5,8 +5,9 @@ class SecurityManager:
     def __init__(self):
         self.users = {
             'root': {'password': 'root', 'group': 'root'},
-            'alice': {'password': 'alice', 'group': 'devs'},
-            'bob': {'password': 'bob', 'group': 'devs'}
+            'alice': {'password': 'pizza', 'group': 'devs'},
+            'bob': {'password': 'patiño', 'group': 'devs'},
+            'Jair': {'password': 'actual17', 'group': 'devs'}
         }
         self.current_user = 'root'
         self.integrity_registry = {}

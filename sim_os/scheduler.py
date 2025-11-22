@@ -3,20 +3,33 @@ from .process import ProcessState
 
 
 class CPUScheduler:
-    def __init__(self, quantum=2):
+    def __init__(self, quantum=2, policy="PRIORITY_RR"):
         self.quantum = quantum
         self.ready_queue = deque()
         self.running_process = None
         self.processes = {}
+        self.policy = policy
 
     def add_process(self, process):
         self.processes[process.pid] = process
         process.record_state(ProcessState.READY, "En cola READY")
         self.ready_queue.append(process)
-        self._sort_by_priority()
+        self._sort_by_policy()
 
-    def _sort_by_priority(self):
-        self.ready_queue = deque(sorted(self.ready_queue, key=lambda p: p.priority, reverse=True))
+    def _sort_by_policy(self):
+        if self.policy == "PRIORITY_RR":
+            self.ready_queue = deque(sorted(self.ready_queue, key=lambda p: p.priority, reverse=True))
+        elif self.policy == "RR":
+            self.ready_queue = deque(list(self.ready_queue))
+        elif self.policy == "FIFO":
+            self.ready_queue = deque(list(self.ready_queue))
+
+    def set_policy(self, policy):
+        if policy in {"PRIORITY_RR", "RR", "FIFO"}:
+            self.policy = policy
+            self._sort_by_policy()
+            return True
+        return False
 
     def schedule_next(self):
         if self.running_process:

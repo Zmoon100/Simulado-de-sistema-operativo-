@@ -47,3 +47,22 @@ class IOManager:
                 'last_request': dev.last_request
             })
         return summary
+
+    def set_mode(self, device_name, mode_str):
+        device = self.devices.get(device_name)
+        if not device:
+            return False, "Dispositivo no reconocido"
+        if mode_str.upper() == "DMA":
+            device.mode = IOMode.DMA
+        elif mode_str.upper() in {"PROGRAMADO", "PROGRAMMED"}:
+            device.mode = IOMode.PROGRAMADO
+        else:
+            return False, "Modo no reconocido"
+        return True, f"Modo de {device.name} cambiado a {device.mode.value}"
+
+    def set_busy(self, device_name, busy):
+        device = self.devices.get(device_name)
+        if not device:
+            return False, "Dispositivo no reconocido"
+        device.busy = bool(busy)
+        return True, f"{device.name} {'activado' if device.busy else 'desactivado'}"
