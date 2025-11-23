@@ -76,6 +76,7 @@ class CommandLineInterface:
             'ps': self._list_processes,
             'create': self._create_process,
             'kill': self._kill_process,
+            'nuke': self._nuke,
             'meminfo': self._memory_info,
             'top': self._system_info,
             'vmem': self._virtual_memory_info,
@@ -114,6 +115,7 @@ Procesos:
   ps                    - Lista todos los procesos
   create <nombre> [prioridad] [memoria] - Crea un nuevo proceso
   kill <pid>            - Termina un proceso
+  nuke                  - Mata todos los procesos
   processflow <pid>     - Muestra ciclo de vida
   schedule              - Ejecuta el planificador de CPU
   schedpolicy <FIFO|RR|PRIORITY_RR> - Cambia política del planificador
@@ -163,6 +165,7 @@ Seguridad:
                 "`ps` - Lista todos los procesos",
                 "`create <nombre> [prioridad] [memoria]` - Crea un proceso",
                 "`kill <pid>` - Termina un proceso",
+                "`nuke` - Mata todos los procesos",
                 "`processflow <pid>` - Ciclo de vida",
                 "`schedule` - Ejecuta el planificador",
                 "`schedpolicy <FIFO|RR|PRIORITY_RR>` - Cambia política"
@@ -294,6 +297,19 @@ Seguridad:
         pid = int(args[0])
         success, message = self.os.kill_process(pid)
         return self._styled_feedback(message, success)
+
+    def _nuke(self, args):
+        processes = list(self.os.cpu_scheduler.get_all_processes())
+        if not processes:
+            return self._styled_feedback("No hay procesos activos", success=False, title="Nuke")
+        count = 0
+        for p in processes:
+            ok, _ = self.os.kill_process(p.pid)
+            if ok:
+                count += 1
+        msg = f"Terminados {count} procesos activos"
+        self.os.log_event("PROCESO", msg)
+        return self._styled_feedback(msg, success=True, title="Nuke")
 
     def _memory_info(self, args):
         info = self.os.memory_manager.get_memory_info()
@@ -524,21 +540,29 @@ Seguridad:
         except Exception:
             pass
         script = [
-            ("Autenticamos al usuario de demo", "login", ["alice", "alice"]),
+            ("Autenticamos al usuario root", "login", ["root", "root"]),
             ("Mostramos el usuario activo", "whoami", []),
+            ("Configuramos el planificador a FIFO", "schedpolicy", ["FIFO"]),
+            ("Mostramos política actual del planificador", "top", []),
             ("Creamos un proceso web de alta prioridad", "create", ["web", "8", "256"]),
             ("Creamos un proceso de sensores", "create", ["sensor", "5", "128"]),
             ("Listamos procesos para ver NEW→READY", "ps", []),
             ("Consultamos memoria física", "meminfo", []),
             ("Revisamos memoria virtual (paginación/LRU)", "vmem", []),
-            ("Ejecutamos el planificador para ver RUNNING y E/S", "schedule", []),
-            ("Mostramos el ciclo de vida del proceso web", "processflow", ["{web}"]),
+            ("Ejecutamos el planificador (FIFO)", "schedule", []),
+            ("Demostramos preempción por IRQ", "dev", ["irq_demo"]),
             ("Inspeccionamos dispositivos de E/S", "ioinfo", []),
+            ("Creamos un directorio 'docs'", "mkdir", ["docs"]),
+            ("Entramos a 'docs'", "cd", ["docs"]),
+            ("Mostramos directorio actual", "whereami", []),
+            ("Creamos un archivo en 'docs'", "touch", ["readme.txt"]),
+            ("Listamos contenido de 'docs'", "ls", []),
+            ("Regresamos al directorio anterior", "cd", [".."]),
             ("Creamos un archivo de log de demo", "touch", ["demo_log.txt"]),
             ("Escribimos en el log (simula E/S a disco)", "echo", ["Sistema", "en", "demo", ">", "demo_log.txt"]),
             ("Leemos el log con verificación de integridad", "cat", ["demo_log.txt"]),
             ("Auditamos permisos y hashes del sistema de archivos", "fsinfo", []),
-            ("Mostramos la línea de tiempo reciente", "timeline", ["12"])
+            ("Mostramos la línea de tiempo reciente", "timeline", ["36"])
         ]
         context = {}
         for idx, (description, command, raw_args) in enumerate(script, start=1):
@@ -560,6 +584,11 @@ Seguridad:
                 pid = self._get_pid_by_name(resolved_args[0])
                 if pid:
                     context[resolved_args[0]] = pid
+        if self.rich_enabled:
+            self._print(self._styled_feedback(f"Planificador: {self.os.cpu_scheduler.policy}", success=True, title="Estado Planificador"))
+        nuke_result = self._nuke([])
+        if nuke_result is not None:
+            self._print(nuke_result)
         return self._styled_feedback("Demo completada. Usa 'timeline' o 'history' para seguir explorando.", success=True, title="Demo")
 
     def _resolve_demo_args(self, raw_args, context):
@@ -800,6 +829,30 @@ Seguridad:
 
     def run(self):
         self._render_banner()
+        authenticated = False
+        while not authenticated:
+            try:
+                user = input("Usuario: ").strip()
+                if user.lower() in ("exit", "quit"):
+                    self._print("Saliendo del simulador...")
+                    self.os.running = False
+                    return
+                pwd = input("Password: ").strip()
+                if pwd.lower() in ("exit", "quit"):
+                    self._print("Saliendo del simulador...")
+                    self.os.running = False
+                    return
+                success, message = self.os.security_manager.authenticate(user, pwd)
+                self.os.log_event("SEGURIDAD", f"Login de {user}: {'OK' if success else 'Fallo'}")
+                self._print(self._styled_feedback(message, success, title="Login"))
+                if success:
+                    authenticated = True
+                else:
+                    continue
+            except KeyboardInterrupt:
+                self._print("\n\nSaliendo del simulador...")
+                self.os.running = False
+                return
         self._print("Escribe 'help' para ver los comandos disponibles\n")
         while self.os.running:
             try:
