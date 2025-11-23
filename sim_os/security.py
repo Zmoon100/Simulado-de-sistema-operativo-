@@ -7,7 +7,8 @@ class SecurityManager:
             'root': {'password': 'root', 'group': 'root'},
             'alice': {'password': 'pizza', 'group': 'devs'},
             'bob': {'password': 'patiño', 'group': 'devs'},
-            'Jair': {'password': 'actual17', 'group': 'devs'}
+            'jair': {'password': 'actual17', 'group': 'devs'},
+            'gael': {'password': 'zmoon', 'group': 'users'}
         }
         self.current_user = 'root'
         self.integrity_registry = {}

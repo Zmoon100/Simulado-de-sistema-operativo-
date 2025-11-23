@@ -84,6 +84,9 @@ class CommandLineInterface:
             'schedpolicy': self._sched_policy,
             'dev': self._dev_command,
             'io': self._io_activate,
+            'mkdir': self._mkdir,
+            'cd': self._cd,
+            'whereami': self._whereami,
             'touch': self._create_file,
             'cat': self._read_file,
             'echo': self._write_file,
@@ -112,7 +115,8 @@ Procesos:
   create <nombre> [prioridad] [memoria] - Crea un nuevo proceso
   kill <pid>            - Termina un proceso
   processflow <pid>     - Muestra ciclo de vida
-  schedule               - Ejecuta el planificador de CPU
+  schedule              - Ejecuta el planificador de CPU
+  schedpolicy <FIFO|RR|PRIORITY_RR> - Cambia política del planificador
 
 Sistema:
   top                   - Muestra información del sistema
@@ -130,6 +134,19 @@ Archivos:
   ls                    - Lista archivos
   rm <archivo>          - Elimina un archivo
   fsinfo                - Detalle de permisos
+  mkdir <directorio>    - Crea directorio
+  cd <ruta>             - Cambia directorio
+  cd ..                 - Regresa al directorio anterior
+  whereami              - Muestra directorio actual
+  
+E/S:
+  dev list              - Lista dispositivos de E/S
+  dev on <disp>         - Activa dispositivo
+  dev off <disp>        - Desactiva dispositivo
+  dev mode <disp> <DMA|PROGRAMADO> - Cambia modo del dispositivo
+  dev irq <disp> [nivel]- Genera una IRQ del dispositivo
+  dev irq_demo          - Demostración visual de preempción por IRQ
+  io <disp> [duración]  - Solicita E/S manual al dispositivo
 
 Seguridad:
   login <usuario> <pass>- Autenticación
@@ -165,13 +182,19 @@ Seguridad:
                 "`echo <texto> > <archivo>` - Escribe archivo",
                 "`ls` - Lista archivos",
                 "`rm <archivo>` - Elimina archivo",
-                "`fsinfo` - Permisos"
+                "`fsinfo` - Permisos",
+                "`mkdir <directorio>` - Crea directorio",
+                "`cd <ruta>` - Cambia directorio",
+                "`cd ..` - Regresa al directorio anterior",
+                "`whereami` - Muestra directorio actual"
             ],
             "E/S": [
                 "`dev list` - Lista dispositivos",
                 "`dev on <dispositivo>` - Activa dispositivo",
                 "`dev off <dispositivo>` - Desactiva dispositivo",
                 "`dev mode <dispositivo> <DMA|PROGRAMADO>` - Cambia modo",
+                "`dev irq <dispositivo> [nivel]` - Genera IRQ",
+                "`dev irq_demo` - Demo de preempción por IRQ",
                 "`io <dispositivo> [duración]` - Solicitud E/S"
             ],
             "Otros": [
@@ -566,6 +589,26 @@ Seguridad:
             self.os.log_event("ARCHIVO", f"Creado archivo '{args[0]}'")
         return self._styled_feedback(message, success)
 
+    def _mkdir(self, args):
+        if not args:
+            return "Uso: mkdir <directorio>"
+        success, message = self.os.file_system.create_directory(args[0])
+        if success:
+            self.os.log_event("ARCHIVO", f"Creado directorio '{args[0]}'")
+        return self._styled_feedback(message, success)
+
+    def _cd(self, args):
+        if not args:
+            return "Uso: cd <ruta>"
+        success, info = self.os.file_system.change_directory(args[0])
+        if success:
+            self.os.log_event("ARCHIVO", f"Directorio actual: {info}")
+        return self._styled_feedback(info if success else info, success)
+
+    def _whereami(self, args):
+        cwd = self.os.file_system.get_cwd()
+        return cwd
+
     def _read_file(self, args):
         if not args:
             return "Uso: cat <archivo>"
@@ -645,7 +688,8 @@ Seguridad:
         return Group(header, user_table, hash_table)
 
     def _list_files(self, args):
-        files = self.os.file_system.list_files()
+        entries = getattr(self.os.file_system, 'list_directory', None)
+        files = entries() if entries else self.os.file_system.list_files()
         if not files:
             return self._styled_feedback("No hay archivos", success=False, title="Archivos")
         if not self.rich_enabled:
@@ -655,8 +699,9 @@ Seguridad:
         table.add_column("Permisos")
         table.add_column("Owner")
         for path in files:
-            info = self.os.file_system.get_file_info(path) or {}
-            table.add_row(path, info.get('perms', '---'), info.get('owner', '?'))
+            info = getattr(self.os.file_system, 'get_path_info', None)
+            data = info(path) if info else (self.os.file_system.get_file_info(path) or {})
+            table.add_row(path, data.get('perms', 'dir' if path in getattr(self.os.file_system, 'directories', {}) else '---'), data.get('owner', '?'))
         return table
 
     def _run_scheduler(self, args):

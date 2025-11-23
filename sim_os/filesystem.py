@@ -39,6 +39,47 @@ class FileSystem:
             self.security_manager.store_integrity_hash(f"file_{path}", content)
         return True, f"Archivo '{filename}' creado"
 
+    def create_directory(self, dirname):
+        path = self._get_full_path(dirname)
+        if path in self.directories:
+            return False, "El directorio ya existe"
+        self.directories[path] = []
+        parent = '/'.join(path.split('/')[:-1]) or '/'
+        if parent not in self.directories:
+            self.directories[parent] = []
+        name = path.split('/')[-1]
+        if name not in self.directories[parent]:
+            self.directories[parent].append(name)
+        owner = self.security_manager.current_user if self.security_manager else "root"
+        if self.security_manager:
+            self.security_manager.store_integrity_hash(f"dir_{path}", owner)
+        return True, f"Directorio '{dirname}' creado"
+
+    def change_directory(self, path):
+        if not path:
+            return False, "Ruta requerida"
+        target = path if path.startswith('/') else f"{self.current_directory.rstrip('/')}/{path}"
+        parts = [p for p in target.split('/') if p != '']
+        stack = []
+        for p in parts:
+            if p == '.':
+                continue
+            if p == '..':
+                if stack:
+                    stack.pop()
+                continue
+            stack.append(p)
+        normalized = '/' + '/'.join(stack)
+        if normalized == '':
+            normalized = '/'
+        if normalized in self.directories:
+            self.current_directory = normalized
+            return True, normalized
+        return False, "Directorio no existe"
+
+    def get_cwd(self):
+        return self.current_directory
+
     def read_file(self, filename):
         path = self._get_full_path(filename)
         entry = self.files.get(path)
@@ -72,8 +113,12 @@ class FileSystem:
         self._remove_from_directory(path)
         return True, f"Archivo '{filename}' eliminado"
 
-    def list_files(self):
-        return [f for f in self.files.keys() if f.startswith(self.current_directory)]
+    def list_directory(self):
+        entries = []
+        names = self.directories.get(self.current_directory, [])
+        for name in names:
+            entries.append(f"{self.current_directory.rstrip('/')}/{name}")
+        return entries
 
     def get_file_info(self, path):
         entry = self.files.get(path)
@@ -86,6 +131,23 @@ class FileSystem:
             'perms': entry.permissions.perms,
             'hash': entry.hash
         }
+
+    def get_path_info(self, path):
+        info = self.get_file_info(path)
+        if info:
+            info['type'] = 'file'
+            return info
+        if path in self.directories:
+            owner = self.security_manager.current_user if self.security_manager else "root"
+            return {
+                'path': path,
+                'owner': owner,
+                'group': self.security_manager.get_user_group(owner) if self.security_manager else 'root',
+                'perms': 'rwxr-x---',
+                'hash': '',
+                'type': 'dir'
+            }
+        return None
 
     def _calc_hash(self, content):
         return hashlib.sha256(content.encode()).hexdigest()
