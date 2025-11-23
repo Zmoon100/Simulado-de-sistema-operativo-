@@ -91,6 +91,29 @@ class OperatingSystem:
         self.cpu_scheduler.running_process = None
         return process
 
+    def trigger_irq(self, device_name, level=1):
+        running = self.cpu_scheduler.get_running_process()
+        if running and running.state == ProcessState.RUNNING:
+            running.record_state(ProcessState.WAITING, f"Interrumpido por IRQ {device_name}")
+            self.log_event("CPU", f"IRQ {device_name} nivel {level} interrumpe PID {running.pid}", process=running)
+        irq_proc, _ = self.create_process(f"irq_{device_name}", priority=10, memory_size=8)
+        if not irq_proc:
+            return False, "No se pudo crear proceso IRQ"
+        try:
+            if irq_proc in self.cpu_scheduler.ready_queue:
+                self.cpu_scheduler.ready_queue.remove(irq_proc)
+            self.cpu_scheduler.ready_queue.appendleft(irq_proc)
+            p = self.run_scheduler_cycle()
+            if p:
+                self.log_event("CPU", f"Atendida IRQ {device_name}", process=p)
+        finally:
+            self.kill_process(irq_proc.pid)
+        if running:
+            running.record_state(ProcessState.READY, "Reanudado tras IRQ")
+            self.cpu_scheduler.ready_queue.appendleft(running)
+            self.log_event("CPU", f"Reanudando PID {running.pid} tras IRQ {device_name}", process=running)
+        return True, f"IRQ {device_name} atendida"
+
     def log_event(self, category, message, process=None, metadata=None):
         event = {
             'step': self.timeline_step,

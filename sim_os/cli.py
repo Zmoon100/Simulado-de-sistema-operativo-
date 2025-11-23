@@ -713,6 +713,24 @@ Seguridad:
                 return "Uso: dev mode <dispositivo> <DMA|PROGRAMADO>"
             ok, msg = self.os.io_manager.set_mode(args[1], args[2])
             return self._styled_feedback(msg, success=ok, title="Dispositivo")
+        if sub == "irq":
+            if len(args) < 2:
+                return "Uso: dev irq <dispositivo> [nivel]"
+            level = int(args[2]) if len(args) > 2 and args[2].isdigit() else 1
+            ok, msg = self.os.trigger_irq(args[1], level)
+            return self._styled_feedback(msg, success=ok, title="IRQ")
+        if sub == "irq_demo":
+            self.os.cpu_scheduler.set_policy("PRIORITY_RR")
+            low, _ = self.os.create_process("low", priority=1, memory_size=64)
+            if self.rich_enabled:
+                self._print(Panel("Preparando proceso de baja prioridad", title="IRQ Demo", border_style="yellow", box=box.ROUNDED if box else None))
+            self._print(self._run_scheduler([]))
+            self._print(self._styled_feedback("Generando IRQ de Teclado", success=True, title="IRQ"))
+            ok, msg = self.os.trigger_irq("teclado", 1)
+            self._print(self._styled_feedback(msg, success=ok, title="IRQ"))
+            self._print(self._styled_feedback("Reanudando proceso de baja prioridad", success=True, title="CPU"))
+            self._print(self._run_scheduler([]))
+            return None
         return self._styled_feedback("Subcomando no reconocido", success=False, title="Dispositivo")
 
     def _io_activate(self, args):
