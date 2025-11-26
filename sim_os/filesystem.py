@@ -1,5 +1,6 @@
 from dataclasses import dataclass, field
 import hashlib
+from datetime import datetime
 
 
 @dataclass
@@ -14,6 +15,9 @@ class FileEntry:
     content: str = ""
     permissions: PermissionSet = field(default_factory=PermissionSet)
     hash: str = ""
+    created_at: datetime = field(default_factory=datetime.now)
+    accessed_at: datetime = field(default_factory=datetime.now)
+    modified_at: datetime = field(default_factory=datetime.now)
 
 
 class FileSystem:
@@ -22,6 +26,15 @@ class FileSystem:
         self.directories = {'/': []}
         self.current_directory = '/'
         self.security_manager = security_manager
+        self.dir_meta = {'/': {
+            'owner': 'root',
+            'group': 'root',
+            'perms': 'rwxr-x---',
+            'hash': '',
+            'created_at': datetime.now(),
+            'accessed_at': datetime.now(),
+            'modified_at': datetime.now()
+        }}
 
     def create_file(self, filename, content=""):
         path = self._get_full_path(filename)
@@ -44,15 +57,34 @@ class FileSystem:
         if path in self.directories:
             return False, "El directorio ya existe"
         self.directories[path] = []
+        owner = self.security_manager.current_user if self.security_manager else "root"
+        self.dir_meta[path] = {
+            'owner': owner,
+            'group': self.security_manager.get_user_group(owner) if self.security_manager else 'root',
+            'perms': 'rwxr-x---',
+            'hash': '',
+            'created_at': datetime.now(),
+            'accessed_at': datetime.now(),
+            'modified_at': datetime.now()
+        }
         parent = '/'.join(path.split('/')[:-1]) or '/'
         if parent not in self.directories:
             self.directories[parent] = []
+            # initialize parent meta if missing
+            if parent not in self.dir_meta:
+                self.dir_meta[parent] = {
+                    'owner': 'root', 'group': 'root', 'perms': 'rwxr-x---', 'hash': '',
+                    'created_at': datetime.now(), 'accessed_at': datetime.now(), 'modified_at': datetime.now()
+                }
         name = path.split('/')[-1]
         if name not in self.directories[parent]:
             self.directories[parent].append(name)
         owner = self.security_manager.current_user if self.security_manager else "root"
         if self.security_manager:
             self.security_manager.store_integrity_hash(f"dir_{path}", owner)
+        # parent directory modified
+        if parent in self.dir_meta:
+            self.dir_meta[parent]['modified_at'] = datetime.now()
         return True, f"Directorio '{dirname}' creado"
 
     def change_directory(self, path):
@@ -74,6 +106,8 @@ class FileSystem:
             normalized = '/'
         if normalized in self.directories:
             self.current_directory = normalized
+            if normalized in self.dir_meta:
+                self.dir_meta[normalized]['accessed_at'] = datetime.now()
             return True, normalized
         return False, "Directorio no existe"
 
@@ -87,6 +121,7 @@ class FileSystem:
             return None, "Archivo no encontrado"
         if not self._has_permission(path, 'r'):
             return None, "Permiso denegado"
+        entry.accessed_at = datetime.now()
         return entry.content, None
 
     def write_file(self, filename, content):
@@ -98,8 +133,13 @@ class FileSystem:
             return False, "Permiso denegado"
         entry.content = content
         entry.hash = self._calc_hash(content)
+        entry.modified_at = datetime.now()
         if self.security_manager:
             self.security_manager.store_integrity_hash(f"file_{path}", content)
+        # mark parent dir modified
+        dir_path = '/'.join(path.split('/')[:-1]) or '/'
+        if dir_path in self.dir_meta:
+            self.dir_meta[dir_path]['modified_at'] = datetime.now()
         return True, f"Archivo '{filename}' actualizado"
 
     def delete_file(self, filename):
@@ -129,7 +169,10 @@ class FileSystem:
             'owner': entry.permissions.owner,
             'group': entry.permissions.group,
             'perms': entry.permissions.perms,
-            'hash': entry.hash
+            'hash': entry.hash,
+            'created_at': entry.created_at,
+            'accessed_at': entry.accessed_at,
+            'modified_at': entry.modified_at
         }
 
     def get_path_info(self, path):
@@ -138,13 +181,28 @@ class FileSystem:
             info['type'] = 'file'
             return info
         if path in self.directories:
-            owner = self.security_manager.current_user if self.security_manager else "root"
+            meta = self.dir_meta.get(path)
+            if not meta:
+                owner = self.security_manager.current_user if self.security_manager else "root"
+                meta = {
+                    'owner': owner,
+                    'group': self.security_manager.get_user_group(owner) if self.security_manager else 'root',
+                    'perms': 'rwxr-x---',
+                    'hash': '',
+                    'created_at': datetime.now(),
+                    'accessed_at': datetime.now(),
+                    'modified_at': datetime.now()
+                }
+                self.dir_meta[path] = meta
             return {
                 'path': path,
-                'owner': owner,
-                'group': self.security_manager.get_user_group(owner) if self.security_manager else 'root',
-                'perms': 'rwxr-x---',
-                'hash': '',
+                'owner': meta['owner'],
+                'group': meta['group'],
+                'perms': meta['perms'],
+                'hash': meta['hash'],
+                'created_at': meta['created_at'],
+                'accessed_at': meta['accessed_at'],
+                'modified_at': meta['modified_at'],
                 'type': 'dir'
             }
         return None
@@ -178,12 +236,20 @@ class FileSystem:
         dir_path = '/'.join(path.split('/')[:-1]) or '/'
         if dir_path not in self.directories:
             self.directories[dir_path] = []
+            self.dir_meta[dir_path] = {
+                'owner': 'root', 'group': 'root', 'perms': 'rwxr-x---', 'hash': '',
+                'created_at': datetime.now(), 'accessed_at': datetime.now(), 'modified_at': datetime.now()
+            }
         filename = path.split('/')[-1]
         if filename not in self.directories[dir_path]:
             self.directories[dir_path].append(filename)
+        if dir_path in self.dir_meta:
+            self.dir_meta[dir_path]['modified_at'] = datetime.now()
 
     def _remove_from_directory(self, path):
         dir_path = '/'.join(path.split('/')[:-1]) or '/'
         filename = path.split('/')[-1]
         if dir_path in self.directories and filename in self.directories[dir_path]:
             self.directories[dir_path].remove(filename)
+            if dir_path in self.dir_meta:
+                self.dir_meta[dir_path]['modified_at'] = datetime.now()

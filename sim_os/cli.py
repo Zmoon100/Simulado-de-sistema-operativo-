@@ -2,6 +2,7 @@ import os
 import time
 from datetime import datetime
 import random
+from collections import deque
 
 try:
     from rich.console import Console, Group  # type: ignore
@@ -55,7 +56,8 @@ class CommandLineInterface:
             'top': ('magenta', '📈'),
             'vmem': ('blue', '💾'),
             'ioinfo': ('yellow', '🔌'),
-            'fsinfo': ('green', '🗂'),
+            'inode': ('green', '🗂'),
+            'tlb_demo': ('blue', '📚'),
             'timeline': ('yellow', '⏱'),
             'history': ('cyan', '📜'),
             'ls': ('yellow', '📁'),
@@ -76,10 +78,13 @@ class CommandLineInterface:
             'ps': self._list_processes,
             'create': self._create_process,
             'kill': self._kill_process,
+            'schedrun': self._sched_run,
+            'tickrate': self._tick_rate,
             'nuke': self._nuke,
             'meminfo': self._memory_info,
             'top': self._system_info,
             'vmem': self._virtual_memory_info,
+            'tlb_demo': self._tlb_demo,
             'processflow': self._process_flow,
             'ioinfo': self._io_info,
             'schedpolicy': self._sched_policy,
@@ -94,7 +99,7 @@ class CommandLineInterface:
             'rm': self._delete_file,
             'ls': self._list_files,
             'schedule': self._run_scheduler,
-            'fsinfo': self._fs_info,
+            'inode': self._inode_info,
             'timeline': self._timeline,
             'history': self._process_history,
             'login': self._login,
@@ -117,13 +122,15 @@ Procesos:
   kill <pid>            - Termina un proceso
   nuke                  - Mata todos los procesos
   processflow <pid>     - Muestra ciclo de vida
-  schedule              - Ejecuta el planificador de CPU
-  schedpolicy <FIFO|RR|PRIORITY_RR> - Cambia política del planificador
+  schedrun              - Ejecuta todos según política activa
+  tickrate <kb>         - Ajusta velocidad (KB por tick)
+  schedpolicy <RR|FIFO|SJF|PRIORITY> - Cambia política del planificador
 
 Sistema:
   top                   - Muestra información del sistema
   meminfo               - Muestra información de memoria
   vmem                  - Estado de memoria virtual
+  tlb_demo [cap] [pid:page ...] - Demo TLB LRU
   ioinfo                - Dispositivos e interrupciones
   timeline [n]          - Muestra últimos eventos
   history <pid>         - Historia detallada de un proceso
@@ -135,7 +142,7 @@ Archivos:
   echo <texto> > <archivo> - Escribe texto en un archivo
   ls                    - Lista archivos
   rm <archivo>          - Elimina un archivo
-  fsinfo                - Detalle de permisos
+  inode <ruta>          - Información i-nodo
   mkdir <directorio>    - Crea directorio
   cd <ruta>             - Cambia directorio
   cd ..                 - Regresa al directorio anterior
@@ -167,13 +174,15 @@ Seguridad:
                 "`kill <pid>` - Termina un proceso",
                 "`nuke` - Mata todos los procesos",
                 "`processflow <pid>` - Ciclo de vida",
-                "`schedule` - Ejecuta el planificador",
-                "`schedpolicy <FIFO|RR|PRIORITY_RR>` - Cambia política"
+                "`schedrun` - Ejecuta según política",
+                "`tickrate <kb>` - Velocidad por tick",
+                "`schedpolicy <RR|FIFO|SJF|PRIORITY>` - Cambia política"
             ],
             "Sistema": [
                 "`top` - Información general",
                 "`meminfo` - Estado de memoria",
                 "`vmem` - Memoria virtual",
+                "`tlb_demo [cap] [pid:page ...]` - Demo TLB LRU",
                 "`ioinfo` - Dispositivos E/S",
                 "`timeline [n]` - Últimos eventos",
                 "`history <pid>` - Historia de un proceso",
@@ -185,7 +194,7 @@ Seguridad:
                 "`echo <texto> > <archivo>` - Escribe archivo",
                 "`ls` - Lista archivos",
                 "`rm <archivo>` - Elimina archivo",
-                "`fsinfo` - Permisos",
+                "`inode <ruta>` - Información i-nodo",
                 "`mkdir <directorio>` - Crea directorio",
                 "`cd <ruta>` - Cambia directorio",
                 "`cd ..` - Regresa al directorio anterior",
@@ -395,6 +404,75 @@ Seguridad:
             log_table.add_row(str(pid), str(page), "FAULT" if fault else "HIT")
         return Group(table, log_table)
 
+    def _tlb_demo(self, args):
+        capacity = None
+        tokens = []
+        if args:
+            if args[0].isdigit():
+                capacity = int(args[0])
+                tokens = args[1:]
+            else:
+                tokens = args
+        if capacity:
+            self.os.virtual_memory.set_tlb_capacity(capacity)
+        # reiniciar TLB para que la demo muestre hits/misses consistentes
+        self.os.virtual_memory.reset_tlb()
+        seq = []
+        for t in tokens:
+            if ':' in t:
+                a, b = t.split(':', 1)
+                if a.isdigit() and b.isdigit():
+                    seq.append((int(a), int(b)))
+        if not seq:
+            # secuencia por defecto con HITS claros y alguna evicción
+            seq = [
+                (1,0),(2,1),(3,2),    # misses iniciales
+                (1,0),(2,1),(3,2),    # hits sobre las mismas entradas
+                (4,0),                # miss agrega nueva entrada
+                (5,1),                # miss provoca evicción LRU
+                (1,0),                # puede ser miss si fue evictado
+            ]
+        events = []
+        for pid, page in seq:
+            hit, msg = self.os.virtual_memory.tlb_access(pid, page)
+            self.os.log_event("MEMORIA", msg)
+            events.append((pid, page, hit, msg))
+        status = self.os.virtual_memory.get_tlb_status()
+        if not self.rich_enabled:
+            lines = [
+                "=== TLB DEMO (LRU) ===",
+                f"Capacidad: {status['capacity']}",
+                f"Entradas: {status['size']}",
+                f"HITS/MISSES: {status['hits']}/{status['misses']}",
+                "Orden (LRU→MRU):",
+                ", ".join([f"pid={p} page={pg}" for (p, pg) in status['order']]),
+                "Eventos:"
+            ]
+            for pid, page, hit, msg in events:
+                lines.append(f"pid={pid} page={page} {'HIT' if hit else 'MISS'}: {msg}")
+            return "\n".join(lines)
+        table = Table(title="TLB Estado", box=box.ROUNDED if box else None)
+        table.add_column("Dato")
+        table.add_column("Valor")
+        table.add_row("Capacidad", str(status['capacity']))
+        table.add_row("Entradas", str(status['size']))
+        table.add_row("HITS", str(status['hits']))
+        table.add_row("MISSES", str(status['misses']))
+        order = Table(title="Orden LRU→MRU", box=box.SIMPLE if box else None)
+        order.add_column("Pos")
+        order.add_column("PID")
+        order.add_column("Página")
+        for idx, (p, pg) in enumerate(status['order']):
+            order.add_row(str(idx+1), str(p), str(pg))
+        log = Table(title="Eventos", box=box.SIMPLE if box else None)
+        log.add_column("PID")
+        log.add_column("Página")
+        log.add_column("Tipo")
+        log.add_column("Detalle")
+        for pid, page, hit, msg in events:
+            log.add_row(str(pid), str(page), "HIT" if hit else "MISS", msg)
+        return Group(table, order, log)
+
     def _process_flow(self, args):
         if not args or not args[0].isdigit():
             return "Uso: processflow <pid>"
@@ -444,24 +522,71 @@ Seguridad:
             )
         return table
 
-    def _fs_info(self, args):
-        files = [self.os.file_system.get_file_info(path) for path in self.os.file_system.files.keys()]
-        files = [f for f in files if f]
-        if not files:
-            return self._styled_feedback("No hay archivos para auditar", success=False, title="FS")
+    def _inode_info(self, args):
+        target = None
+        if args and args[0]:
+            raw = args[0]
+            target = raw if raw.startswith('/') else f"{self.os.file_system.get_cwd().rstrip('/')}/{raw}"
+        else:
+            target = self.os.file_system.get_cwd()
+        info = self.os.file_system.get_file_info(target)
+        is_file = info is not None
+        if not is_file:
+            info = self.os.file_system.get_path_info(target)
+        if not info:
+            return self._styled_feedback("Ruta no encontrada", success=False, title="Inode")
+        if is_file:
+            size_bytes = len(self.os.file_system.files[target].content.encode())
+            entry = {
+                'path': info['path'],
+                'type': 'file',
+                'size': f"{size_bytes} B",
+                'owner': info['owner'],
+                'group': info['group'],
+                'perms': info['perms'],
+                'hash': info['hash'],
+                'created_at': info['created_at'],
+                'accessed_at': info['accessed_at'],
+                'modified_at': info['modified_at']
+            }
+        else:
+            children = self.os.file_system.directories.get(target, [])
+            entry = {
+                'path': info['path'],
+                'type': 'dir',
+                'size': f"{len(children)} items",
+                'owner': info['owner'],
+                'group': info['group'],
+                'perms': info['perms'],
+                'hash': info['hash'],
+                'created_at': info['created_at'],
+                'accessed_at': info['accessed_at'],
+                'modified_at': info['modified_at']
+            }
         if not self.rich_enabled:
-            lines = ["=== FS INFO ==="]
-            for info in files:
-                lines.append(f"{info['path']} {info['perms']} {info['owner']}:{info['group']}")
+            lines = ["=== INODE INFO ==="]
+            lines.append(f"{entry['path']} [{entry['type']}] {entry['size']} {entry['perms']} {entry['owner']}:{entry['group']}")
+            lines.append(f"creación: {entry['created_at'].strftime('%Y-%m-%d %H:%M:%S')}")
+            lines.append(f"último acceso: {entry['accessed_at'].strftime('%Y-%m-%d %H:%M:%S')}")
+            lines.append(f"última modificación: {entry['modified_at'].strftime('%Y-%m-%d %H:%M:%S')}")
             return "\n".join(lines)
-        table = Table(title="Permisos y Hashes", box=box.SIMPLE_HEAVY if box else None)
-        table.add_column("Ruta", style="bold")
-        table.add_column("Propietario")
-        table.add_column("Grupo")
-        table.add_column("Permisos")
-        table.add_column("Hash SHA256")
-        for info in files:
-            table.add_row(info['path'], info['owner'], info['group'], info['perms'], info['hash'][:12] + "...")
+        table = Table(title="i-nodo", box=box.SIMPLE_HEAVY if box else None)
+        table.add_column("Campo", style="bold")
+        table.add_column("Valor")
+        rows = [
+            ("Ruta", entry['path']),
+            ("Tipo", entry['type']),
+            ("Tamaño", entry['size']),
+            ("Propietario", entry['owner']),
+            ("Grupo", entry['group']),
+            ("Permisos", entry['perms']),
+            ("Hash", entry['hash'][:12] + "..." if entry['hash'] else "-"),
+            ("Creación", entry['created_at'].strftime('%Y-%m-%d %H:%M:%S')),
+            ("Último acceso", entry['accessed_at'].strftime('%Y-%m-%d %H:%M:%S')),
+            ("Última modificación", entry['modified_at'].strftime('%Y-%m-%d %H:%M:%S'))
+        ]
+        for k, v in rows:
+            table.add_row(k, v)
         return table
 
     def _timeline(self, args):
@@ -539,51 +664,47 @@ Seguridad:
             self.os.file_system.delete_file("demo_log.txt")
         except Exception:
             pass
-        script = [
-            ("Autenticamos al usuario root", "login", ["root", "root"]),
-            ("Mostramos el usuario activo", "whoami", []),
-            ("Configuramos el planificador a FIFO", "schedpolicy", ["FIFO"]),
-            ("Mostramos política actual del planificador", "top", []),
-            ("Creamos un proceso web de alta prioridad", "create", ["web", "8", "256"]),
-            ("Creamos un proceso de sensores", "create", ["sensor", "5", "128"]),
-            ("Listamos procesos para ver NEW→READY", "ps", []),
-            ("Consultamos memoria física", "meminfo", []),
-            ("Revisamos memoria virtual (paginación/LRU)", "vmem", []),
-            ("Ejecutamos el planificador (FIFO)", "schedule", []),
-            ("Demostramos preempción por IRQ", "dev", ["irq_demo"]),
-            ("Inspeccionamos dispositivos de E/S", "ioinfo", []),
-            ("Creamos un directorio 'docs'", "mkdir", ["docs"]),
-            ("Entramos a 'docs'", "cd", ["docs"]),
-            ("Mostramos directorio actual", "whereami", []),
-            ("Creamos un archivo en 'docs'", "touch", ["readme.txt"]),
-            ("Listamos contenido de 'docs'", "ls", []),
-            ("Regresamos al directorio anterior", "cd", [".."]),
-            ("Creamos un archivo de log de demo", "touch", ["demo_log.txt"]),
-            ("Escribimos en el log (simula E/S a disco)", "echo", ["Sistema", "en", "demo", ">", "demo_log.txt"]),
-            ("Leemos el log con verificación de integridad", "cat", ["demo_log.txt"]),
-            ("Auditamos permisos y hashes del sistema de archivos", "fsinfo", []),
-            ("Mostramos la línea de tiempo reciente", "timeline", ["36"])
-        ]
-        context = {}
-        for idx, (description, command, raw_args) in enumerate(script, start=1):
-            if command == "demo":
-                continue
-            resolved_args = self._resolve_demo_args(raw_args, context)
-            try:
-                handler = self.commands.get(command)
-                if not handler:
-                    self._print(self._styled_feedback(f"Comando desconocido en demo: {command}", success=False, title="Demo"))
+        self._print(self._styled_feedback("Autenticando", success=True, title="Demo"))
+        self._print(self._login(["root", "root"]))
+        self._print(self._whoami([]))
+
+        def run_policy_block(policy_name):
+            self._print(self._styled_feedback(f"Política: {policy_name}", success=True, title="Planificador"))
+            self._print(self._sched_policy([policy_name]))
+            names = [f"{policy_name.lower()}_{i}" for i in range(1, 6)]
+            for name in names:
+                prio = random.randint(1, 10)
+                avail = getattr(self.os.memory_manager, 'available_memory', 1024)
+                mem = random.choice([60, 80, 100, 120, 140])
+                if mem > avail:
+                    mem = max(20, min(avail - 20, mem))
+                if mem <= 0 or mem > avail:
                     continue
-                result = handler(resolved_args)
-                if result is not None:
-                    self._print(result)
-            except Exception as exc:
-                self._print(self._styled_feedback(f"Demo interrumpida: {exc}", success=False, title="Demo"))
-                break
-            if command == "create" and resolved_args:
-                pid = self._get_pid_by_name(resolved_args[0])
-                if pid:
-                    context[resolved_args[0]] = pid
+                res = self._create_process([name, str(prio), str(mem)])
+                if res is not None:
+                    self._print(res)
+            self._print(self._tick_rate(["20"]))
+            self._print(self._sched_run([]))
+
+        run_policy_block("RR")
+        run_policy_block("FIFO")
+        run_policy_block("SJF")
+        run_policy_block("PRIORITY")
+
+        self._print(self._styled_feedback("Demostración de IRQ", success=True, title="IRQ"))
+        self._print(self._dev_command(["irq_demo"]))
+        self._print(self._io_info([]))
+        self._print(self._mkdir(["docs"]))
+        self._print(self._cd(["docs"]))
+        self._print(self._whereami([]))
+        self._print(self._create_file(["readme.txt"]))
+        self._print(self._list_files([]))
+        self._print(self._cd([".."]))
+        self._print(self._create_file(["demo_log.txt"]))
+        self._print(self._write_file(["Sistema", "en", "demo", ">", "demo_log.txt"]))
+        self._print(self._read_file(["demo_log.txt"]))
+        self._print(self._inode_info([]))
+        self._print(self._timeline(["64"]))
         if self.rich_enabled:
             self._print(self._styled_feedback(f"Planificador: {self.os.cpu_scheduler.policy}", success=True, title="Estado Planificador"))
         nuke_result = self._nuke([])
@@ -752,11 +873,75 @@ Seguridad:
 
     def _sched_policy(self, args):
         if not args:
-            return "Uso: schedpolicy <FIFO|RR|PRIORITY_RR>"
+            return "Uso: schedpolicy <RR|FIFO|SJF|PRIORITY>"
         ok = self.os.cpu_scheduler.set_policy(args[0].upper())
         if not ok:
             return self._styled_feedback("Política no reconocida", success=False, title="Planificador")
         return self._styled_feedback(f"Política cambiada a {self.os.cpu_scheduler.policy}", success=True, title="Planificador")
+
+    def _tick_rate(self, args):
+        if not args or not args[0].isdigit():
+            return "Uso: tickrate <kb>"
+        value = int(args[0])
+        self.os.tick_kb = max(1, value)
+        return self._styled_feedback(f"Tickrate ajustado a {self.os.tick_kb} KB/tick", success=True, title="Planificador")
+
+    def _sched_run(self, args):
+        processes = [p for p in self.os.cpu_scheduler.get_all_processes() if getattr(p, 'remaining_kb', p.memory_size) > 0]
+        if not processes:
+            return self._styled_feedback("No hay procesos para ejecutar", success=False, title="Planificador")
+        tick = self.os.tick_kb
+        policy = self.os.cpu_scheduler.policy
+        tick_counter = 1
+        def apply_tick(proc):
+            left = getattr(proc, 'remaining_kb', proc.memory_size)
+            if left <= 0:
+                return True
+            new_left = max(0, left - tick)
+            setattr(proc, 'remaining_kb', new_left)
+            proc.cpu_time += 1
+            total = proc.memory_size
+            done = total - new_left
+            percent = int((done / total) * 100)
+            if new_left == 0:
+                self._print(f"tick {tick_counter}, proceso {proc.name} terminado")
+                self.os.kill_process(proc.pid)
+                return True
+            else:
+                self._print(f"tick {tick_counter}, proceso {proc.name} {percent}% completado")
+                return False
+        if policy == "RR":
+            dq = deque(processes)
+            while dq:
+                proc = dq.popleft()
+                finished = apply_tick(proc)
+                tick_counter += 1
+                if not finished:
+                    dq.append(proc)
+        elif policy == "FIFO":
+            for proc in processes:
+                while getattr(proc, 'remaining_kb', 0) > 0:
+                    finished = apply_tick(proc)
+                    tick_counter += 1
+                    if finished:
+                        break
+        elif policy == "SJF":
+            ordered = sorted(processes, key=lambda p: getattr(p, 'remaining_kb', p.memory_size))
+            for proc in ordered:
+                while getattr(proc, 'remaining_kb', 0) > 0:
+                    finished = apply_tick(proc)
+                    tick_counter += 1
+                    if finished:
+                        break
+        elif policy == "PRIORITY":
+            ordered = sorted(processes, key=lambda p: p.priority)
+            for proc in ordered:
+                while getattr(proc, 'remaining_kb', 0) > 0:
+                    finished = apply_tick(proc)
+                    tick_counter += 1
+                    if finished:
+                        break
+        return self._styled_feedback("Ejecución completada", success=True, title="Planificador")
 
     def _dev_command(self, args):
         if not args:

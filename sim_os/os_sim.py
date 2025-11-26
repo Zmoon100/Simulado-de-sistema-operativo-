@@ -18,6 +18,7 @@ class OperatingSystem:
         self.cpu_scheduler = CPUScheduler(quantum=2)
         self.virtual_memory = VirtualMemoryManager(total_frames=64, page_size=16)
         self.io_manager = IOManager()
+        self.tick_kb = 20
         self.running = True
         self.start_time = datetime.now()
         self.timeline = []
@@ -38,6 +39,7 @@ class OperatingSystem:
         pages = self.virtual_memory.create_space(process.pid, memory_size)
         self.log_event("MEMORIA", f"Espacio virtual creado ({pages} páginas) para PID {process.pid}", process=process)
         self.security_manager.store_integrity_hash(f"process_{process.pid}", process.name)
+        setattr(process, 'remaining_kb', memory_size)
         self.cpu_scheduler.add_process(process)
         self.log_event("PROCESO", f"Creado proceso '{name}' (PID {process.pid})", process=process, metadata={'prioridad': priority})
         self.log_event("MEMORIA", f"Asignados {memory_size} KB a PID {process.pid}", process=process, metadata={'direccion': address})

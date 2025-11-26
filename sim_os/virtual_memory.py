@@ -1,4 +1,4 @@
-from collections import deque
+from collections import deque, OrderedDict
 
 
 class VirtualMemoryManager:
@@ -11,6 +11,10 @@ class VirtualMemoryManager:
         self.lru_queue = deque()
         self.page_faults = 0
         self.access_log = []
+        self.tlb_capacity = 4
+        self.tlb = OrderedDict()
+        self.tlb_hits = 0
+        self.tlb_misses = 0
 
     def create_space(self, pid, size_kb):
         pages = max(1, (size_kb + self.page_size - 1) // self.page_size)
@@ -71,4 +75,37 @@ class VirtualMemoryManager:
             'frames_used': used,
             'frames_free': len(self.free_frames),
             'page_faults': self.page_faults
+        }
+
+    def set_tlb_capacity(self, capacity):
+        self.tlb_capacity = max(1, int(capacity))
+        while len(self.tlb) > self.tlb_capacity:
+            self.tlb.popitem(last=False)
+
+    def reset_tlb(self):
+        self.tlb.clear()
+        self.tlb_hits = 0
+        self.tlb_misses = 0
+
+    def tlb_access(self, pid, page):
+        key = (pid, page)
+        if key in self.tlb:
+            self.tlb.move_to_end(key)
+            self.tlb_hits += 1
+            return True, f"TLB HIT pid={pid} page={page}"
+        self.tlb_misses += 1
+        self.tlb[key] = True
+        if len(self.tlb) > self.tlb_capacity:
+            victim_key, _ = self.tlb.popitem(last=False)
+            return False, f"TLB MISS pid={pid} page={page} -> evict pid={victim_key[0]} page={victim_key[1]}"
+        return False, f"TLB MISS pid={pid} page={page}"
+
+    def get_tlb_status(self):
+        order = list(self.tlb.keys())
+        return {
+            'capacity': self.tlb_capacity,
+            'size': len(self.tlb),
+            'order': order,
+            'hits': self.tlb_hits,
+            'misses': self.tlb_misses
         }
