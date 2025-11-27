@@ -1,0 +1,109 @@
+MANUAL TÉCNICO — Simulado de Sistema Operativo
+
+Nombre del proyecto: Simulado de Sistema Operativo
+Repositorio: GitHub — https://github.com/Zmoon100/Simulado-de-sistema-operativo- 
+Colaboradores: Bruno Espinoza de los Monteros Hernández, Gael Fuentes Gutiérrez, Jair Morales Torre, Brayan Yael Reyes Fermin, Carlos Arturo Olguin Ruiz
+Lenguaje: Python 100 %
+Archivos principales: carpeta “sim_os”, “archivo run.py”.
+Objetivo: simular de forma general y didáctica el funcionamiento de un sistema operativo.
+
+
+Este proyecto se encuadra dentro de lo que comúnmente se denomina un “simulador de sistema operativo”: es un programa que simplifica de manera didáctica el cómo es que funciona un OS real, con el objetivo de enseñar de manera simplificada el funcionamiento del mismo, experimentación o comprensión de los conceptos fundamentales de sistemas operativos (planificación de procesos, estados, ciclos de ejecución, etc.). Este tipo de proyectos son útiles para aprender sin requerir privilegios de sistema o acceso a hardware real.
+1. Arquitectura general del sistema
+1.1 Principio de modularidad y separación de responsabilidades
+El diseño del sistema operativo tiene un enfoque modular y con ciertas limitaciones (pocos archivos), ya que es una simulación de conceptos básicos de un sistema operativo:
+Hay un script que ejecuta el programa “run.py”, que sirve para la ejecución del programa por completo.
+Hay una carpeta de código fuente en donde se encuentran todos los módulos del programa “sim_os” en el cual se encuentra toda la lógica que tiene el programa: definición de procesos, planificación, manejo de colas, ejecución, etc.
+Se implemento un archivo “tempCodeRunnerFile.py”, con el propósito de que se cumpla una condición dada como lo sería que se haya ejecutado un archivo.
+El objetivo de la modulación de todos los procesos del simulador es para poder tener una organización de los procesos y tener mayor control de los errores, permitir actualizaciones y mantenimiento, extensión futura y comprensión del sistema por terceros (por ejemplo, otros estudiantes, desarrolladores, o cualquier persona externa al proyecto).
+1.2 Componentes funcionales
+Dentro de la carpeta “sim_os” se encuentran los módulos estos son los que tienen un funcionamiento especifico dentro de la simulación, es esencial que se mantengan aislador y tener mayor control de ellos.
+Process.py — Representación interna de los procesos (su metadata, estado, atributos esenciales del programa).
+Scheduler.py —Es el encargado de la ejecución y la continuación de los procesos; por lo cual administra el manejo de colas de procesos listos, cambios de estado, prioridad de los procesos.
+Virtual_memory.py — Es el encardo de ejecutar los procesos de manera secuencial, simulando el trabajo de la CPU de manera muy sencilla.
+Io.py — El cual se encarga de la detección de los dispositivos de entrada y salida, dispositivos no reconocidos, en el estado en el que se encuentra, activado y desactivado.
+Memory.py — En este modulo encontramos la cantidad máxima de memoria que se le asigna al simulador.
+Os_sim.py — Se encarga de la representación de las colas de “listos”, “esperando”, “ejecutando”, “terminados”, PID, IRQ.
+Security.py — El cual se encarga de la seguridad del programa, en el cual vienen los usuarios, password, la aceptación y denegación de acceso.
+Filesystem.py — Este es el encargado de los archivos, creación, eliminación, grupo, usuario, dirección.
+Cli.py — En este archivo viene la mayor cantidad de código, este se encarga de enviar los requisitos a los demás archivos y se encarga de darle un diseño visual en la terminal al simulador para una mejor experiencia y entendimiento del simulador.
+Esta arquitectura conceptual modular facilita la extensibilidad: nuevos módulos pueden agregarse sin reestructurar todo el sistema, si se respetan las separaciones de responsabilidades.
+1.3 Diagrama esquemático de arquitectura
+
+┌────────────────────────────┐
+│        run.py (entry)     		  │ ← Punto de arranque / configuración inicial
+└────────────┬───────────────┘
+                 │ inicializa / invoca
+                 ▼
+┌────────────────────────────┐
+│    Núcleo del simulador      		  │ ← orquesta ejecución, invoca scheduler, CPU virtual, procesa estados
+└────────────┬───────────────┘
+                 │
+    ┌─────────┼──────────┐
+    │          	 │             │
+    ▼           ▼             ▼
+┌────────┐ ┌────────┐ ┌────────────┐
+│ Módulo 	│ │Scheduler │ │ Colas/PCB  	 │ ← procesos, colas de listos/espera, estructuras de control
+│Procesos	│ │ / Planif │ │ (Estados) 	 │
+└────────┘ └────────┘ └────────────┘
+                         	    │
+                         	    ▼
+                ┌────────────────┐
+                │ CPU virtual / 	  │ ← simula ejecución de procesos
+                │ Simulación     	  │
+                └────────────────┘
+
+Este diagrama resume las relaciones lógicas entre los componentes principales del sistema: el run.py inicia la simulación, el núcleo orquesta la ejecución, invoca al scheduler, que selecciona procesos desde las colas estructuras PCB, y a su vez la CPU virtual simula su ejecución.
+2. Decisiones de diseño: criterios, supuestos y justificaciones
+Al momento de diseñar este simulador se han tomado ciertas decisiones con el fin de balancear sencillez, claridad y funcionalidad básica. A continuación, se explican las decisiones más relevantes, con sus motivaciones.
+2.1 Lenguaje: Python
+Se eligió Python ya que es un lenguaje de programación que nos da muchas más facilidades que nos ofrecen otro tipo de lenguaje como C, JavaScript, etc.
+Python elimina la necesidad de gestión de memoria manual, punteros, bajo-nivel, lo que simplifica enormemente la integración del programa, ideal para un proyecto educativo.
+Este enfoque es común en simuladores didácticos de sistemas operativos que buscan centrarse en la lógica de scheduling y procesos, más que en detalles de hardware real. Esta estrategia ha sido empleada en otros simuladores de OS publicados en Python.
+2.2 Modularidad, simplicidad sobre complejidad
+Se prioriza un diseño simple, con pocos módulos, lo que facilita la lectura del código y comprenda rápidamente la estructura general, sin verse abrumado por complejidades innecesarias.
+La modularidad permite que futuras extensiones se añadan de forma aislada reduciendo riesgo de introducir errores globales.
+La simplicidad también permite usarlo en entornos educacionales, trabajos de práctica, para familiarizar a estudiantes con conceptos de OS sin requerir configuración compleja ni privilegios de sistema.
+2.3 Abstracción de la CPU, simulación en lugar de ejecución real
+El simulador no pretende ejecutar código real de usuario, ni compilar binarios, ni manejar interrupciones reales, ni interactuar con hardware. En su lugar, simula la CPU a nivel lógico.
+Esto nos permite concentrarse en los conceptos de scheduler, estados de procesos, transición entre estados, colas y métricas. Sin lidiar con detalles de hardware, memoria física, controladores, privilegios, etc.
+2.4 Uso de estructuras de datos simples para colas y PCB
+Para representar procesos y colas, se utilizan estructuras simples de Python: objetos/clases para los procesos (PCB simplificados), listas o colas nativas para la cola de listos/espera.
+Esto simplifica la implementación: no se requieren estructuras complejas, memoria manual, gestión de punteros, arreglos de bajo nivel, etc.
+2.5 Flexibilidad para expansión futura
+Aunque la versión actual es básica, la arquitectura modular deja abierta la puerta para agregar módulos más sofisticados: memoria, E/S, sincronización, prioridades, políticas avanzadas de scheduler, etc.
+Esa decisión de diseño — dejar la puerta abierta para extensiones — hace que el proyecto tenga valor a mediano plazo como base educativa o de investigación.
+
+3. Complejidad algorítmica y análisis de rendimiento
+Ya que este es un simulador pequeño y que no esta especializado para tomarlo como referencia podemos decir que tiene varias limitaciones y no se abarcan todos los temas u componentes de un sistema operativo real.
+3.1 Scheduler, selección de proceso
+Si el scheduler sigue una política FIFO (First-Come First-Serve) o Round Robin simple, la selección del siguiente proceso toma el primer elemento de la cola de listos-operación.
+La inserción de nuevos procesos en la cola de listos (al crearse o al reingresar tras quantum / finalización de E/S simulada).
+Si se implementaran políticas más complejas (prioridades, orden por ráfaga, SJF, SRTF, colas multinivel), la selección podría costar más: por ejemplo, si hay que recorrer toda la cola para elegir el mejor candidato.
+Conclusión: con políticas simples, el overhead del scheduling es bajo; con políticas complejas, puede crecer linealmente con el número de procesos listos.
+3.2 Mantenimiento de colas, transición de estados
+Mover procesos entre colas (listos - bloqueados, etc.) implica eliminar de una lista/cola e insertar en otra.
+3.3 Simulación de ejecución (CPU virtual)
+El tiempo total que tarda la simulación depende de cuántos ticks se ejecutan en total, cuántos procesos hay y cuántas unidades de tiempo necesitan para completarse. Esto significa que, si hay muchos procesos o sus ráfagas son muy largas, el tiempo total de simulación crecerá proporcionalmente a la cantidad de trabajo.
+3.4 Escalabilidad, límite razonable
+Como la estructura es de alto nivel ya que está programada en Python, este simulador no está pensado para manejar decenas de miles de procesos con precisión realista. Su uso óptimo es para docenas o cientos de procesos, escenarios educativos, no cargas industriales.
+
+4. Límites, restricciones y omisiones del sistema
+El simulador actual por como este diseño tiene múltiples limitaciones importantes a comparación de lo que sería un sistema operativo real. Es importante reconocerlos para no malinterpretar su alcance.
+No hay acceso a hardware real ni instrucciones de máquina: el simulador no ejecuta binarios reales, no tiene CPU real, no maneja registros, no ejecuta instrucciones en la máquina. Todo es simulado lógicamente.
+No existe protección de memoria ni espacios de direcciones independientes por proceso: la memoria es simbólica ya que no hay paginación, segmentación, ni aislamiento de procesos.
+No hay concurrencia real, no hay multiprocesamiento, no hay manejo real de interrupciones de hardware ni E/S real.
+No hay sistema de archivos, disco, E/S, dispositivos, drivers.
+El scheduler y la gestión de procesos son minimos: incluye políticas básicas, sin sincronización entre procesos, sin IPC (inter-process communication), sin locking, etc.
+No hay interfaz de usuario sofisticada.
+No está preparada para cargas grandes o uso intensivo.
+Estas limitaciones son decisiones que se fueron tomando respecto a la creación del programa, ya que se necesitaba mantener una simulacion simple, ya que no tenemos conocimientos para implementar más recursos.
+
+5. Enfoque del simulador
+Este simulador de un sistema operativo se enfoca en el aprendizaje de como es que funcionan los sistemas operativos de manera didáctica, ya que es un complemento a la teoría y con este apoyo nos da una gran ventaja al saber como es que los sistemas operativos funcionan por detrás de lo que se ve atreves de una pantalla, todo esto haciéndolo en un entorno controlado, seguro y simplificado, sin la necesidad de interactuar de manera directa con el hardware ya que no se usaron métodos tan elaborados para la creación de la simulación.
+Las ventajas de este enfoque son claras: portabilidad, capacidad de modificación, claridad conceptual y posibilidad de experimentar con diferentes algoritmos.
+
+Conclusión
+El proyecto “Simulado de Sistema Operativo” es una base muy valiosa y prometedora para un simulador educativo: permite representar los componentes básicos de un OS —procesos, scheduler, CPU virtual— con un diseño modular y escrito en Python, lo que lo hace accesible y fácil de entender.
+Si bien su versión actual es básica, su arquitectura conceptual, combinada con su modularidad, lo convierte en un punto de partida ideal para proyectos de extensión. Ya que nos quedamos con una base estructurada y con el objetivo de a lo largo del tiempo mejorar y agregar nuevas funciones para el simulador del sistema operativo.
+De igual manera este proyecto que se ejecutó en Python no da un mayor conocimiento sobre el lenguaje de programación y estos conocimiento aprendidos los podemos extender a otros ámbitos en el mundo del ciber espacio, ya que este programa nos dio un mayor entendimiento de lo que sucede con cada parte de un sistema operativo, lo que nos favorece en gran medida a la área de ciberseguridad a la cual nos estamos especializando.
